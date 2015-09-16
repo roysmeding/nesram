@@ -86,20 +86,21 @@ static inline float compute_vi(struct filectx *fa, struct filectx *fb) {
 	}
 
 	// compute mutual information and joint entropy
-	float mi = 0., h = 0.;
+	float mi = 0.;
+//	float  h = 0.;
 	for(size_t i = 0; i < NUM_BYTES; i++) {
 		for(size_t j = 0; j < NUM_BYTES; j++) {
 			if(joint_freq[i*NUM_BYTES + j] > 0) {
 				float jp = ((float)joint_freq[i*NUM_BYTES + j]) / size_shared;
 
 				mi += jp * log2f(jp / (fa->prob[i] * fb->prob[j]));
-				h  -= jp * log2f(jp);
+//				h  -= jp * log2f(jp);
 			}
 		}
 	}
 
 	// compute and return variation of information
-
+/*
 	float vi;
 	if(mi == 0. && h == 0.) {
 		vi = 0.;
@@ -108,8 +109,9 @@ static inline float compute_vi(struct filectx *fa, struct filectx *fb) {
 	} else {
 		vi = 1. - (mi/h);
 	}
+*/
 
-	return vi;
+	return mi;
 }
 
 #define NUMFMT "%10.8f"

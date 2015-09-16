@@ -1,111 +1,139 @@
-import csv
 import sys
+import math
+import cairo
 import numpy as np
-import scipy.cluster.hierarchy
+import sklearn.cluster
+import sklearn.manifold
 import matplotlib.pyplot as plt
 
 sys.stderr.write("Loading data from '%s'...\n" % sys.argv[1])
-A = np.genfromtxt(sys.argv[1], delimiter=',')
+A = np.genfromtxt(sys.argv[1]+'.vi', delimiter=',')
 
 assert np.size(A,0) == np.size(A,1), "Expected square distance matrix"
-n_observations = np.size(A,0)
+n_seqs = np.size(A,0)
 
-sys.stderr.write("Number of datasets: %d\n" % n_observations)
+ent = np.loadtxt(sys.argv[1]+'.ent')
+assert np.size(ent) == n_seqs
 
-sys.stderr.write("Constructing reduced distance vector...\n")
-# turn (triangular) distance matrix into the reduced form that scipy wants
-reduced = []
+sys.stderr.write("Number of datasets: %d\n" % n_seqs)
 
-for j in range(1,np.size(A,0)):
-    for i in range(j+1,np.size(A,1)):
-        reduced.append(A[i,j])
+# reduce
+THRESHOLD = 0.1
+mask = ent>THRESHOLD
+ent = ent[mask]
+A = A[mask,:][:,mask]
 
-reduced = np.clip(reduced, 0., 1.)
+n_seqs = np.size(A,0)
+sys.stderr.write("After reduction: %d\n" % n_seqs)
+
+# fix A
+A = A + np.transpose(A) - np.diag(A)
+
+# MDS
+sys.stderr.write("Reducing to 2D using MDS...\n")
+
+se = sklearn.manifold.MDS(dissimilarity='precomputed', n_jobs=-1)
+dimred = se.fit_transform(A)
+
+sys.stderr.write("\tStress = %f\n" % se.stress_)
+
+# construct affinity matrix
+aff = -A
 
 sys.stderr.write("Clustering...\n")
-# cluster that form to get a hierarchical binary tree of clusterings
-Z = scipy.cluster.hierarchy.linkage(reduced)
 
-# create a more useful binary tree structure for traversal
-tree = {i:i for i in range(n_observations)}
+# cluster
+ap = sklearn.cluster.AffinityPropagation(affinity='precomputed')
+labels = ap.fit_predict(aff)
 
-for idx,(i,j,d,n) in enumerate(Z):
-    lhs = tree.pop(int(i))
-    rhs = tree.pop(int(j))
+WIDTH=3840
+HEIGHT=2160
 
-    tree[idx+n_observations] = ([lhs, rhs], d)
+print "Creating %dx%d image..." % (WIDTH, HEIGHT)
+surface = cairo.ImageSurface (cairo.FORMAT_ARGB32, WIDTH, HEIGHT)
+ctx = cairo.Context (surface)
 
-assert len(tree) == 2
+xmin, xmax = np.min(dimred[:,0]), np.max(dimred[:,0])
+ymin, ymax = np.min(dimred[:,1]), np.max(dimred[:,1])
+w,h = xmax-xmin, ymax-ymin
 
-tree = ([tree[tree.keys()[0]], tree[tree.keys()[1]]], 0.)
+ctx.move_to(   0.,     0.)
+ctx.line_to(   0., HEIGHT)
+ctx.line_to(WIDTH, HEIGHT)
+ctx.line_to(WIDTH,     0.)
+ctx.line_to(   0.,     0.)
+ctx.set_source_rgba(0.,0.,0.,1.)
+ctx.fill()
 
-# simplify that binary tree to an N-ary tree where needed
-# we merge nodes where one child is a leaf node,
-# the other isn't but has a leaf node child too,
-# and they are close distance-wise
+scale = min(WIDTH/w, HEIGHT/h) * 0.95
+ctx.scale(scale, scale)
 
-sys.stderr.write("Before simplification: %d nodes, %d edges\n" % (len(Z)+n_observations, len(Z)*2))
+tx,ty = (-xmin-xmax+WIDTH/scale)/2., (-ymin-ymax+HEIGHT/scale)/2.
+ctx.translate(tx, ty)
 
-sys.stderr.write("Simplifying...\n")
+cm = plt.cm.get_cmap('gist_rainbow')    # colormap for for nodes/edges based on index
 
-nodes = []
-edges = []
-idx = n_observations
+print "Drawing edges..."
+ctx.set_line_width(0.001)
+n = n_seqs*(n_seqs-1)/2
 
-def simplify(l, parent):
-    global idx, nodes, edges
-    c,d = l
+l = len(str(n))
+fmt = '%'+str(l)+'d / %'+str(l)+'d'
+back = '\b' * (2*l+3)
 
-    if isinstance(c[0], (int,long)) and isinstance(c[1], (int,long)):
-        # two leaf nodes. add them to the parent
-        edges.append((parent, c[0], d))
-        edges.append((parent, c[1], d))
+sys.stdout.write('\t' + (fmt % (0,n)))
+for j in range(1,n_seqs-1):
+    done = j*n_seqs - j*(j+1)/2
+    sys.stdout.write(back + (fmt % (done,n)))
+    sys.stdout.flush()
+    for i in range(j+1,n_seqs):
+        if labels[i] != labels[j]:
+            continue
 
-        
-    elif not (isinstance(c[0], (int,long))  or  isinstance(c[1], (int,long))):
-        # neither child is leaf node. preserve node for children and simplify children
-        new_parent = idx
-        idx += 1
-        nodes.append(new_parent)
-        edges.append((parent, new_parent, d))
+        x1,y1 = dimred[i,:]
+        x2,y2 = dimred[j,:]
 
-        simplify(c[0], new_parent)
-        simplify(c[1], new_parent)
+        if math.sqrt((x2-x1)**2 + (y2-y1)**2) > 0.3:
+            continue
 
-    else:
-        # one leaf node, one not. remove node, attach children to parent
+        r1,g1,b1,_    = cm(float(i)/n_seqs)
+        r2,g2,b2,_    = cm(float(j)/n_seqs)
 
-        lc,ic = None,None
-        if isinstance(c[0], (int,long)):
-            lc,ic = c[1], c[0]
-        else:
-            lc,ic = c[0], c[1]
+        w1 = ent[i]/(80./9.) + 0.1
+        w2 = ent[j]/(80./9.) + 0.1
 
-        simplify(lc, parent)
-        edges.append((parent, ic, d))
+        gr = cairo.LinearGradient(x1,y1,x2,y2)
+        gr.add_color_stop_rgba(0.0, r1, g1, b1, w1)
+        gr.add_color_stop_rgba(1.0, r2, g2, b2, w2)
 
-root = idx
-idx += 1
-nodes.append(root)
-simplify(tree, root)
+        ctx.set_source(gr)
 
-sys.stderr.write("After simplification: %d nodes, %d edges\n" % (len(nodes)+n_observations, len(edges)))
+        ctx.move_to(x1,y1)
+        ctx.line_to(x2,y2)
+        ctx.stroke()
 
-# print it in DOT format
-print 'digraph mem {'
-print "\tnode [shape=none];"
+NODE_SIZE = 0.005
 
-for n in range(n_observations):
-    print "\tn%04d [label=\"%04x\"];" % (n,n)
+print "\nDrawing nodes..."
 
-print "\tnode [shape=none, width=0.02, height=0.02, label=\"\"];"
+l = len(str(n_seqs))
+fmt = '%'+str(l)+'d / %'+str(l)+'d'
+back = '\b' * (2*l+3)
 
-for n in nodes:
-    print "\tn%04d;" % n
+sys.stdout.write('\t' + (fmt % (0,n_seqs)))
 
-for a,b,d in edges:
-    print "n%04d -> n%04d [len=%f];" % (a,b,d+0.01)
+for i in range(n_seqs):
+    sys.stdout.write(back + (fmt % (i, n_seqs)))
+    sys.stdout.flush()
+    x,y = dimred[i,:]
+    w = ent[i]/(80./9.) + 0.1
+    ctx.arc(x,y,NODE_SIZE*(0.5+ent[i]*0.5/8.),0, 2 * math.pi)
+    r,g,b,_ = cm(float(i)/n_seqs)
+    ctx.set_source_rgba(r,g,b, w)
+    ctx.fill()
 
-print '}'
+print "\nSaving..."
+surface.write_to_png(sys.argv[2])
 
-sys.stderr.write("Done.\n")
+print "Done."
+
