@@ -14,8 +14,8 @@ A = A + np.transpose(A) - np.diag(A)
 
 print "dim\tstress\trmse"
 
-for n in range(1,21):
-    se = sklearn.manifold.MDS(n_components=n, dissimilarity='precomputed', n_jobs=2)
+for n in range(1900,2200,25):
+    se = sklearn.manifold.MDS(n_components=n, dissimilarity='precomputed', n_jobs=-1)
     red = se.fit_transform(A)
     red_dist = dist.squareform(dist.pdist(red))
     rms_err = np.sqrt(((A-red_dist)**2).mean())

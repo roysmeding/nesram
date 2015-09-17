@@ -36,26 +36,31 @@ while len(mapping) > 2:
     labels  = ap.labels_
     indices = ap.cluster_centers_indices_
 
+    # add edges to centers
     for node,label in enumerate(labels):
         if mapping[node] != mapping[indices[label]]:
-            edges.append((mapping[indices[label]], mapping[node]))
+            i,j = mapping[indices[label]], mapping[node]
+            edges.append((i,j,A[i,j]))
 
     mapping = [mapping[k] for k in indices]
     aff = aff[indices,:][:,indices]
 
     sys.stderr.write("clustered to %d\n" % len(indices))
 
-print "digraph g {"
-print "root [shape=none];"
-for i in range(n_seqs):
-    print "n%04d [shape=none, label=\"%03x\"];" % (i,i)
+if len(mapping) == 2:
+    if ent[mapping[0]] > ent[mapping[1]]:
+        j,i = mapping[0], mapping[1]
+    else:
+        i,j = mapping[0], mapping[1]
 
-for i,j in edges:
-    d = 10.**A[i,j] / 10.
-    print "n%04d -> n%04d [len=\"%f\"];" % (i,j,d)
+edges.append((i,j,A[i,j]))
 
-i,j = mapping[0], mapping[1]
-print "root -> n%04d [len=\"%f\"];" % (i, A[i,j]/2.)
-print "root -> n%04d [len=\"%f\"];" % (j, A[i,j]/2.)
+sys.stderr.write("Produced %d edges.\n" % len(edges))
 
-print "}"
+# output
+sys.stderr.write("Writing output...\n")
+
+np.savetxt(sys.argv[2], np.array(edges), fmt=["%d", "%d", "%f"])
+
+sys.stderr.write("done.\n")
+
