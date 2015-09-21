@@ -13,7 +13,7 @@ assert np.size(A,0) == np.size(A,1)
 A = A + np.transpose(A) - np.diag(A)
 
 print "Constructing MDS embedding..."
-se = sklearn.manifold.MDS(dissimilarity='precomputed', n_jobs=-1)
+se = sklearn.manifold.MDS(metric=False, dissimilarity='precomputed', n_jobs=-1)
 red = se.fit_transform(A)
 np.savetxt(sys.argv[2], red)
 red_dist = dist.squareform(dist.pdist(red))

@@ -30,11 +30,30 @@ edges = []
 
 mapping = list(range(2048))
 
+prev_clusters = 2048
+
+n = 0
+
 while len(mapping) > 2:
-    ap = sklearn.cluster.AffinityPropagation(affinity='precomputed')
+    preference = np.median(aff) - 0.1*n*np.std(aff)
+    ap = sklearn.cluster.AffinityPropagation(affinity='precomputed', preference=preference)
     ap.fit(aff)
     labels  = ap.labels_
     indices = ap.cluster_centers_indices_
+
+    clusters = len(indices)
+
+    sys.stderr.write("clustered to %d\n" % clusters)
+
+    if clusters == prev_clusters:
+        n += 1
+        sys.stderr.write("\tRetrying with %f standard deviations lower preference\n" % (0.1*n))
+        prev_clusters = clusters
+    else:
+        if n > 0:
+            sys.stderr.write("\tSituation normalized at %f stdevs\n" % (0.1*n))
+            n = 0
+    prev_clusters = clusters
 
     # add edges to centers
     for node,label in enumerate(labels):
@@ -45,15 +64,13 @@ while len(mapping) > 2:
     mapping = [mapping[k] for k in indices]
     aff = aff[indices,:][:,indices]
 
-    sys.stderr.write("clustered to %d\n" % len(indices))
-
 if len(mapping) == 2:
     if ent[mapping[0]] > ent[mapping[1]]:
         j,i = mapping[0], mapping[1]
     else:
         i,j = mapping[0], mapping[1]
 
-edges.append((i,j,A[i,j]))
+    edges.append((i,j,A[i,j]))
 
 sys.stderr.write("Produced %d edges.\n" % len(edges))
 

@@ -1,0 +1,37 @@
+FCEUX    := ${TOOLPATH}/fceux/bin/fceux
+
+DUMPFILES := $(addprefix dump/,$(shell seq -w 0 2047))
+
+all : ${PREFIX}.ent ${PREFIX}.vi ${PREFIX}.dimred /var/www/nesram/${PREFIX}.png
+
+# play the TAS movie to get the RAM dump
+${PREFIX}.ramdump : ${ROMFILE} ${MOVFILE} ${FCEUX}
+	${FCEUX} --opengl --sound 0 --playmov "${MOVFILE}" "${ROMFILE}"
+	chmod 444 dump.dat
+	mv -f "dump.dat" "$@"
+
+# per-address time series files
+${DUMPFILES} : ${PREFIX}.ramdump ${TOOLPATH}/split_dump.py
+	mkdir -p dump
+	python ${TOOLPATH}/split_dump.py "$<"
+
+# entropy and variation of information
+${PREFIX}.ent ${PREFIX}.vi : ${DUMPFILES} ${TOOLPATH}/mi
+	${TOOLPATH}/mi ${PREFIX} ${DUMPFILES}
+
+# dimensionality reduction on VI data
+${PREFIX}.dimred : ${PREFIX}.vi ${TOOLPATH}/dimred.py
+	python ${TOOLPATH}/dimred.py $< $@
+
+${PREFIX}.cluster : ${PREFIX}.vi ${PREFIX}.ent ${TOOLPATH}/cluster.py
+	python ${TOOLPATH}/cluster.py ${PREFIX} $@
+
+/var/www/nesram/${PREFIX}.png : ${PREFIX}.cluster ${PREFIX}.dimred ${PREFIX}.ent ${TOOLPATH}/cluster_draw.py
+	python ${TOOLPATH}/cluster_draw.py ${PREFIX} $@
+
+clean :
+	rm -rf ${DUMPFILES} ${PREFIX}.ent ${PREFIX}.vi ${PREFIX}.cluster ${PREFIX}.dimred
+	rm -rf dump
+
+mrproper : clean
+	rm -f ${PREFIX}.ramdump
